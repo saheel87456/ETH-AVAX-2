@@ -1,18 +1,29 @@
 import { useState, useEffect } from "react";
 import { ethers } from "ethers";
 import atm_abi from "../artifacts/contracts/Assessment.sol/Assessment.json";
+import { Line } from "react-chartjs-2";
+import { Chart, CategoryScale, LinearScale, LineController, PointElement, LineElement } from 'chart.js';
+
+Chart.register(CategoryScale, LinearScale, LineController, PointElement, LineElement);
 
 export default function HomePage() {
   const [ethWallet, setEthWallet] = useState(undefined);
   const [account, setAccount] = useState(undefined);
   const [atm, setATM] = useState(undefined);
   const [balance, setBalance] = useState(undefined);
-  const [pin, setPin] = useState("");
-  const [oldPin, setOldPin] = useState("");
-  const [newPin, setNewPin] = useState("");
-  const [correctPin, setCorrectPin] = useState("1234"); // Set the correct PIN here
-  const [accountHolderName, setAccountHolderName] = useState("Megharaj");
-  const [age, setAge] = useState(20);
+  const [chartData, setChartData] = useState({
+    labels: [],
+    datasets: [
+      {
+        label: "Balance Over Time",
+        data: [],
+        fill: false,
+        borderColor: "rgba(75,192,192,1)",
+      },
+    ],
+  });
+  const [action, setAction] = useState(""); // "deposit" or "withdraw"
+  const [amount, setAmount] = useState(1);
 
   const contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
   const atmABI = atm_abi.abi;
@@ -24,14 +35,14 @@ export default function HomePage() {
 
     if (ethWallet) {
       const accounts = await ethWallet.request({ method: "eth_accounts" });
-      handleAccount(accounts[0]);
+      handleAccount(accounts);
     }
   };
 
-  const handleAccount = (account) => {
-    if (account) {
-      console.log("Account connected: ", account);
-      setAccount(account);
+  const handleAccount = (accounts) => {
+    if (accounts.length > 0) {
+      console.log("Account connected: ", accounts[0]);
+      setAccount(accounts[0]);
     } else {
       console.log("No account found");
     }
@@ -44,9 +55,9 @@ export default function HomePage() {
     }
 
     const accounts = await ethWallet.request({ method: "eth_requestAccounts" });
-    handleAccount(accounts[0]);
+    handleAccount(accounts);
 
-    // once the wallet is set we can get a reference to our deployed contract
+    // once the wallet is set, we can get a reference to our deployed contract
     getATMContract();
   };
 
@@ -60,68 +71,40 @@ export default function HomePage() {
 
   const getBalance = async () => {
     if (atm) {
-      setBalance((await atm.getBalance()).toNumber());
+      const currentBalance = (await atm.getBalance()).toNumber();
+      setBalance(currentBalance);
+
+      // Update chart data
+      setChartData((prevChartData) => ({
+        labels: [...prevChartData.labels, new Date().toLocaleTimeString()],
+        datasets: [
+          {
+            ...prevChartData.datasets[0],
+            data: [...prevChartData.datasets[0].data, currentBalance],
+          },
+        ],
+      }));
     }
   };
 
-  const deposit = async () => {
-    if (atm) {
-      let tx = await atm.deposit(10); // Deposit 10 ETH
-      await tx.wait();
-      getBalance();
-      showAlert("Transaction successful! Deposited 10 ETH.");
+  const handleTransaction = async (action) => {
+    if (atm && amount > 0) {
+      let tx;
+      if (action === "deposit") {
+        tx = await atm.deposit(amount);
+      } else if (action === "withdraw") {
+        tx = await atm.withdraw(amount);
+      }
+
+      if (tx) {
+        await tx.wait();
+        getBalance();
+      }
     }
   };
 
-  const withdraw = async () => {
-    if (atm) {
-      let tx = await atm.withdraw(10); // Withdraw 10 ETH
-      await tx.wait();
-      getBalance();
-      showAlert("Transaction successful! Withdrawn 10 ETH.");
-    }
-  };
-
-  const showAlert = (message) => {
-    alert(message);
-  };
-
-  const handlePinChange = (e) => {
-    setPin(e.target.value);
-  };
-
-  const handleOldPinChange = (e) => {
-    setOldPin(e.target.value);
-  };
-
-  const handleNewPinChange = (e) => {
-    setNewPin(e.target.value);
-  };
-
-  const validatePin = () => {
-    return pin === correctPin;
-  };
-
-  const changePin = async () => {
-    if (oldPin === correctPin) {
-      // Update the PIN
-      await atm.changePin(newPin);
-      setCorrectPin(newPin);
-      showAlert("PIN changed successfully!");
-      setOldPin("");
-      setNewPin("");
-    } else {
-      showAlert("Incorrect old PIN. PIN change failed.");
-    }
-  };
-
-  const performTransaction = async (transactionFunction, successMessage) => {
-    if (validatePin()) {
-      await transactionFunction();
-      showAlert(successMessage);
-    } else {
-      showAlert("Incorrect PIN. Transaction failed.");
-    }
+  const fetchBalance = () => {
+    getBalance();
   };
 
   const initUser = () => {
@@ -132,7 +115,13 @@ export default function HomePage() {
 
     // Check to see if the user is connected. If not, connect to their account
     if (!account) {
-      return <button onClick={connectAccount}>Connect Metamask Wallet</button>;
+      return (
+        <div>
+          <button onClick={connectAccount}>
+            Please connect your Metamask wallet
+          </button>
+        </div>
+      );
     }
 
     if (balance === undefined) {
@@ -141,28 +130,21 @@ export default function HomePage() {
 
     return (
       <div>
-        <p>Your Account: {account}</p>
-        <p>Account Holder: {accountHolderName}</p>
-        <p>Age: {age}</p>
-        <p>Your Balance: {balance}</p>
-        <input type="password" placeholder="Enter PIN" value={pin} onChange={handlePinChange} />
-        <button onClick={() => performTransaction(deposit, "Transaction successful! Deposited 10 ETH.")}>
-          Deposit 10 ETH
-        </button>
-        <button onClick={() => performTransaction(withdraw, "Transaction successful! Withdrawn 10 ETH.")}>
-          Withdraw 10 ETH
-        </button>
-      </div>
-    );
-  };
-
-  const changePinSection = () => {
-    return (
-      <div>
-        <h2>Change PIN</h2>
-        <input type="password" placeholder="Enter Old PIN" value={oldPin} onChange={handleOldPinChange} />
-        <input type="password" placeholder="Enter New PIN" value={newPin} onChange={handleNewPinChange} />
-        <button onClick={changePin}>Change PIN</button>
+        <div>
+          <p>Your Account: {account}</p>
+          <input
+            type="number"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+          <button onClick={() => handleTransaction("deposit")}>Deposit</button>
+          <button onClick={() => handleTransaction("withdraw")}>Withdraw</button>
+          <button onClick={fetchBalance}>Fetch Balance</button>
+          {balance !== undefined && <p>Your Balance: {balance}</p>}
+        </div>
+        <div>
+          <Line data={chartData} />
+        </div>
       </div>
     );
   };
@@ -173,21 +155,18 @@ export default function HomePage() {
 
   return (
     <main className="container">
-      <div className="content">
-        {initUser()}
-        {changePinSection()}
-      </div>
+      <header>
+        <h1>Welcome to the Metacrafters ATM!</h1>
+      </header>
+      {initUser()}
       <style jsx>{`
         .container {
-          text-align: center;
-          background-color: red;
-          color: white;
-        }
-
-        .content {
           display: flex;
-          justify-content: space-between;
-          padding: 20px;
+          justify-content: center;
+          align-items: center;
+          flex-direction: column;
+          background-color: #d2b48c; /* Light Brown background color */
+          min-height: 100vh; /* Set minimum height to full viewport height */
         }
       `}</style>
     </main>
